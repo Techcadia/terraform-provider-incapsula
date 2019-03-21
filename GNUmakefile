@@ -3,6 +3,11 @@ GOFMT_FILES?=$$(find . -name '*.go' |grep -v vendor)
 WEBSITE_REPO=github.com/hashicorp/terraform-website
 PKG_NAME=incapsula
 
+VERSION=$(shell cat VERSION)
+GOHOSTOS:=$(shell go env GOHOSTOS)
+GOHOSTARCH:=$(shell go env GOHOSTARCH)
+
+
 default: build
 
 build: fmtcheck
@@ -12,6 +17,8 @@ test: fmtcheck
 	go test -i $(TEST) || exit 1
 	echo $(TEST) | \
 		xargs -t -n4 go test $(TESTARGS) -timeout=30s -parallel=4
+testtf:	build
+	  cp $$GOPATH/bin/terraform-provider-$(PKG_NAME) $$HOME/.terraform.d/plugins/$(GOHOSTOS)_$(GOHOSTARCH)/terraform-provider-$(PKG_NAME)_v0.0.1
 
 testacc: fmtcheck
 	TF_ACC=1 go test $(TEST) -v $(TESTARGS) -timeout 120m

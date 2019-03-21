@@ -60,10 +60,55 @@ func resourceACLSecurityRule() *schema.Resource {
 				DiffSuppressFunc: suppressEquivalentStringDiffs,
 			},
 			"urls": &schema.Schema{
-				Description:      "A comma separated list of resource paths.",
-				Type:             schema.TypeString,
-				Optional:         true,
-				DiffSuppressFunc: suppressEquivalentStringDiffs,
+				Description: "A map of resource paths. e.g. { not_equals = [\"/my_value\"] }",
+				Type:        schema.TypeSet,
+				Optional:    true,
+				MaxItems:    1,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"equals": {
+							Type: schema.TypeList,
+							Elem: &schema.Schema{
+								Type: schema.TypeString,
+							},
+							Optional: true,
+						},
+						"not_equals": {
+							Type: schema.TypeList,
+							Elem: &schema.Schema{
+								Type: schema.TypeString,
+							},
+							Optional: true,
+						},
+						"prefix": {
+							Type: schema.TypeList,
+							Elem: &schema.Schema{
+								Type: schema.TypeString,
+							},
+							Optional: true,
+						},
+						"suffix": {
+							Type: schema.TypeList,
+							Elem: &schema.Schema{
+								Type: schema.TypeString,
+							},
+							Optional: true,
+						},
+						"contains": {
+							Type: schema.TypeList, Elem: &schema.Schema{
+								Type: schema.TypeString,
+							},
+							Optional: true,
+						},
+						"not_contains": {
+							Type: schema.TypeList,
+							Elem: &schema.Schema{
+								Type: schema.TypeString,
+							},
+							Optional: true,
+						},
+					},
+				},
 			},
 			"url_patterns": &schema.Schema{
 				Description: "The patterns should be in accordance with the matching urls sent by the urls parameter. Options: CONTAINS | EQUALS | PREFIX | SUFFIX | NOT_EQUALS | NOT_CONTAIN | NOT_PREFIX | NOT_SUFFIX",
@@ -114,14 +159,12 @@ func resourceACLSecurityRuleRead(d *schema.ResourceData, m interface{}) error {
 			case blacklistedCountries:
 				d.Set("countries", strings.Join(entry.Geo.Countries, ","))
 			case blacklistedURLs:
-				urls := make([]string, 0)
-				urlPatterns := make([]string, 0)
+				urls := make(map[string][]interface{}, 0)
 				for _, url := range entry.Urls {
-					urls = append(urls, url.Value)
-					urlPatterns = append(urlPatterns, url.Pattern)
+					pattern := strings.ToLower(url.Pattern)
+					urls[pattern] = append(urls[pattern], url.Value)
 				}
-				d.Set("urls", strings.Join(urls, ","))
-				d.Set("url_patterns", strings.Join(urlPatterns, ","))
+				d.Set("urls", []map[string][]interface{}{urls})
 			case blacklistedIPs:
 				d.Set("ips", strings.Join(entry.Ips, ","))
 			case whitelistedIPs:
