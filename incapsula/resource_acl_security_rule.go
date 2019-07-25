@@ -2,6 +2,7 @@ package incapsula
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -47,6 +48,12 @@ func resourceACLSecurityRule() *schema.Resource {
 			},
 
 			// Optional Arguments
+			"continents": &schema.Schema{
+				Description:      "A comma separated list of continent codes.",
+				Type:             schema.TypeString,
+				Optional:         true,
+				DiffSuppressFunc: suppressEquivalentStringDiffs,
+			},
 			"countries": &schema.Schema{
 				Description:      "A comma separated list of country codes.",
 				Type:             schema.TypeString,
@@ -95,7 +102,8 @@ func resourceACLSecurityRule() *schema.Resource {
 							Optional: true,
 						},
 						"contains": {
-							Type: schema.TypeList, Elem: &schema.Schema{
+							Type: schema.TypeList,
+							Elem: &schema.Schema{
 								Type: schema.TypeString,
 							},
 							Optional: true,
@@ -115,6 +123,11 @@ func resourceACLSecurityRule() *schema.Resource {
 				Type:        schema.TypeString,
 				Optional:    true,
 			},
+			"client_apps": &schema.Schema{
+				Description: "The client apps",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
 		},
 	}
 }
@@ -122,9 +135,14 @@ func resourceACLSecurityRule() *schema.Resource {
 func resourceACLSecurityRuleCreate(d *schema.ResourceData, m interface{}) error {
 	client := m.(*Client)
 
+	ruleID := d.Get("rule_id").(string)
+
+	log.Printf("[INFO] Creating Incapsula ACL Rule for id: %s\n", ruleID)
+
 	_, err := client.ConfigureACLSecurityRule(
 		d.Get("site_id").(int),
-		d.Get("rule_id").(string),
+		ruleID,
+		d.Get("continents").(string),
 		d.Get("countries").(string),
 		d.Get("ips").(string),
 		d.Get("urls").(string),
@@ -132,11 +150,14 @@ func resourceACLSecurityRuleCreate(d *schema.ResourceData, m interface{}) error 
 	)
 
 	if err != nil {
+		log.Printf("[ERROR] Could not create Incapsula ACL Rule for id: %s, %s\n", ruleID, err)
 		return err
 	}
 
 	// Set the rule ID
 	d.SetId(d.Get("rule_id").(string))
+
+	log.Printf("[INFO] Created Incapsula ACL Rule for id: %s\n", ruleID)
 
 	return resourceACLSecurityRuleRead(d, m)
 }
@@ -145,9 +166,14 @@ func resourceACLSecurityRuleRead(d *schema.ResourceData, m interface{}) error {
 	// Implement by reading the SiteResponse for the site
 	client := m.(*Client)
 
+	ruleID := d.Get("rule_id").(string)
+
+	log.Printf("[INFO] Reading Incapsula ACL Rule for id: %s\n", ruleID)
+
 	siteStatusResponse, err := client.SiteStatus("acl-rule-read", d.Get("site_id").(int))
 
 	if err != nil {
+		log.Printf("[ERROR] Could not read Incapsula ACL Rule for id: %s, %s\n", ruleID, err)
 		return err
 	}
 
@@ -158,6 +184,7 @@ func resourceACLSecurityRuleRead(d *schema.ResourceData, m interface{}) error {
 			switch entry.ID {
 			case blacklistedCountries:
 				d.Set("countries", strings.Join(entry.Geo.Countries, ","))
+				d.Set("continents", strings.Join(entry.Geo.Continents, ","))
 			case blacklistedURLs:
 				urls := make(map[string][]interface{}, 0)
 				for _, url := range entry.Urls {
@@ -174,6 +201,8 @@ func resourceACLSecurityRuleRead(d *schema.ResourceData, m interface{}) error {
 		}
 	}
 
+	log.Printf("[INFO] Read Incapsula ACL Rule for id: %s\n", ruleID)
+
 	return nil
 }
 
@@ -185,23 +214,31 @@ func resourceACLSecurityRuleUpdate(d *schema.ResourceData, m interface{}) error 
 func resourceACLSecurityRuleDelete(d *schema.ResourceData, m interface{}) error {
 	client := m.(*Client)
 
+	ruleID := d.Get("rule_id").(string)
+
+	log.Printf("[INFO] Deleting Incapsula ACL Rule for id: %s\n", ruleID)
+
 	// Implement delete by clearing out the rule configuration
 	_, err := client.ConfigureACLSecurityRule(
 		d.Get("site_id").(int),
-		d.Get("rule_id").(string),
+		ruleID,
 		"", // countries
+		"", // continents
 		"", // ips
 		"", // urls
-		"", // url_patterns
+		"", // urls
 	)
 
 	if err != nil {
+		log.Printf("[ERROR] Could not delete Incapsula ACL Rule for id: %s, %s\n", ruleID, err)
 		return err
 	}
 
 	// Set the ID to empty
 	// Implicitly clears the resource
 	d.SetId("")
+
+	log.Printf("[INFO] Deleted Incapsula ACL Rule for id: %s\n", ruleID)
 
 	return nil
 }

@@ -1,9 +1,9 @@
 package incapsula
 
 import (
-	"strconv"
-
 	"github.com/hashicorp/terraform/helper/schema"
+	"log"
+	"strconv"
 )
 
 func resourceSite() *schema.Resource {
@@ -19,7 +19,7 @@ func resourceSite() *schema.Resource {
 		Schema: map[string]*schema.Schema{
 			// Required Arguments
 			"domain": &schema.Schema{
-				Description: "The domain name of the site. For example: www.example.com, hello.example.com, example.com.",
+				Description: "The fully qualified domain name of the site. For example: www.example.com, hello.example.com.",
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
@@ -52,12 +52,52 @@ func resourceSite() *schema.Resource {
 				Optional:    true,
 			},
 			"log_level": &schema.Schema{
-				Description: "Available only for Enterprise Plan customers that purchased the Logs Integration SKU. Sets the log reporting level for the site. Options are full, security, none and default.",
+				Description: "Available only for Enterprise Plan customers that purchased the Logs Integration SKU. Sets the log reporting level for the site. Options are full, security, none, and default.",
 				Type:        schema.TypeString,
 				Optional:    true,
 			},
 			"logs_account_id": &schema.Schema{
 				Description: "Available only for Enterprise Plan customers that purchased the Logs Integration SKU. Numeric identifier of the account that purchased the logs integration SKU and which collects the logs. If not specified, operation will be performed on the account identified by the authentication parameters.",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
+			"active": &schema.Schema{
+				Description: "active or bypass.",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
+			"domain_validation": &schema.Schema{
+				Description: "email or html or dns.",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
+			"approver": &schema.Schema{
+				Description: "my.approver@email.com (some approver email address).",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
+			"ignore_ssl": &schema.Schema{
+				Description: "true or empty string.",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
+			"acceleration_level": &schema.Schema{
+				Description: "none | standard | aggressive.",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
+			"seal_location": &schema.Schema{
+				Description: "api.seal_location.bottom_left | api.seal_location.none | api.seal_location.right_bottom | api.seal_location.right | api.seal_location.left | api.seal_location.bottom_right | api.seal_location.bottom.",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
+			"domain_redirect_to_full": &schema.Schema{
+				Description: "true or empty string.",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
+			"remove_ssl": &schema.Schema{
+				Description: "true or empty string.",
 				Type:        schema.TypeString,
 				Optional:    true,
 			},
@@ -97,8 +137,9 @@ func resourceSite() *schema.Resource {
 
 func resourceSiteCreate(d *schema.ResourceData, m interface{}) error {
 	client := m.(*Client)
-
 	domain := d.Get("domain").(string)
+
+	log.Printf("[INFO] Creating Incapsula site for domain: %s\n", domain)
 
 	siteAddResponse, err := client.AddSite(
 		domain,
@@ -107,16 +148,30 @@ func resourceSiteCreate(d *schema.ResourceData, m interface{}) error {
 		d.Get("send_site_setup_emails").(string),
 		d.Get("site_ip").(string),
 		d.Get("force_ssl").(string),
-		d.Get("log_level").(string),
-		d.Get("logs_account_id").(string),
 	)
 
 	if err != nil {
+		log.Printf("[ERROR] Could not create Incapsula site for domain: %s, %s\n", domain, err)
 		return err
 	}
 
 	// Set the Site ID
 	d.SetId(strconv.Itoa(siteAddResponse.SiteID))
+	log.Printf("[INFO] Created Incapsula site for domain: %s\n", domain)
+
+	// list of params from config that are specific to update after site creation
+	updateParams := [6]string{"active", "acceleration_level", "seal_location", "domain_redirect_to_full", "remove_ssl", "ignore_ssl"}
+	for i := 0; i < len(updateParams); i++ {
+		param := updateParams[i]
+		if d.Get(param) != "" {
+			log.Printf("[INFO] Updating Incapsula site param (%s) with value (%s) for site_id: %d\n", param, d.Get(param).(string), siteAddResponse.SiteID)
+			_, err := client.UpdateSite(strconv.Itoa(siteAddResponse.SiteID), param, d.Get(param).(string))
+			if err != nil {
+				log.Printf("[ERROR] Could not update Incapsula site param (%s) with value (%s) for site_id: %d %s\n", param, d.Get(param).(string), siteAddResponse.SiteID, err)
+				return err
+			}
+		}
+	}
 
 	// Set the rest of the state from the resource read
 	return resourceSiteRead(d, m)
@@ -128,14 +183,18 @@ func resourceSiteRead(d *schema.ResourceData, m interface{}) error {
 	domain := d.Get("domain").(string)
 	siteID, _ := strconv.Atoi(d.Id())
 
+	log.Printf("[INFO] Reading Incapsula site for domain: %s\n", domain)
+
 	siteStatusResponse, err := client.SiteStatus(domain, siteID)
 
 	if err != nil {
+		log.Printf("[ERROR] Could not read Incapsula site for domain: %s, %s\n", domain, err)
 		return err
 	}
 
 	d.Set("site_creation_date", siteStatusResponse.SiteCreationDate)
 	d.Set("domain", siteStatusResponse.Domain)
+	d.Set("account_id", siteStatusResponse.AccountID)
 
 	// Set the DNS information
 	dnsARecordValues := make([]string, 0)
@@ -151,29 +210,51 @@ func resourceSiteRead(d *schema.ResourceData, m interface{}) error {
 	}
 	d.Set("dns_a_record_value", dnsARecordValues)
 
+	log.Printf("[INFO] Read Incapsula site for domain: %s\n", domain)
+
 	return nil
 }
 
 func resourceSiteUpdate(d *schema.ResourceData, m interface{}) error {
-	// Not implemented
-	return nil
+	client := m.(*Client)
+	siteID, _ := strconv.Atoi(d.Id())
+
+	updateParams := [6]string{"active", "acceleration_level", "seal_location", "domain_redirect_to_full", "remove_ssl", "ignore_ssl"}
+	for i := 0; i < len(updateParams); i++ {
+		param := updateParams[i]
+		if d.Get(param) != "" {
+			log.Printf("[INFO] Updating Incapsula site param (%s) with value (%s) for site_id: %d\n", param, d.Get(param).(string), siteID)
+			_, err := client.UpdateSite(strconv.Itoa(siteID), param, d.Get(param).(string))
+			if err != nil {
+				log.Printf("[ERROR] Could not update Incapsula site param (%s) with value (%s) for site_id: %d %s\n", param, d.Get(param).(string), siteID, err)
+				return err
+			}
+		}
+	}
+
+	// Set the rest of the state from the resource read
+	return resourceSiteRead(d, m)
 }
 
 func resourceSiteDelete(d *schema.ResourceData, m interface{}) error {
 	client := m.(*Client)
-
 	domain := d.Get("domain").(string)
 	siteID, _ := strconv.Atoi(d.Id())
+
+	log.Printf("[INFO] Deleting Incapsula site for domain: %s\n", domain)
 
 	err := client.DeleteSite(domain, siteID)
 
 	if err != nil {
+		log.Printf("[ERROR] Could not delete Incapsula site for domain: %s, %s\n", domain, err)
 		return err
 	}
 
 	// Set the ID to empty
 	// Implicitly clears the resource
 	d.SetId("")
+
+	log.Printf("[INFO] Deleted Incapsula site for domain: %s\n", domain)
 
 	return nil
 }

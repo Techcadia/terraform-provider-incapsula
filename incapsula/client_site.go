@@ -5,38 +5,23 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net/http"
 	"net/url"
 	"strconv"
 )
 
-// Client represents an internal client that brokers calls to the Incapsula API
-type Client struct {
-	config     *Config
-	httpClient *http.Client
-}
-
-// NewClient creates a new client with the provided configuration
-func NewClient(config *Config) *Client {
-	client := &http.Client{}
-	return &Client{config: config, httpClient: client}
-}
-
-// Endpoints (unexported consts)
-const endpointAccount = "account"
 const endpointSiteAdd = "sites/add"
-const endpointSiteDelete = "sites/delete"
 const endpointSiteStatus = "sites/status"
-const endpointACLRuleConfigure = "sites/configure/acl"
-
-// ACL Rule Enumerations
-const blacklistedCountries = "api.acl.blacklisted_countries"
-const blacklistedURLs = "api.acl.blacklisted_urls"
-const blacklistedIPs = "api.acl.blacklisted_ips"
-const whitelistedIPs = "api.acl.whitelisted_ips"
+const endpointSiteUpdate = "sites/configure"
+const endpointSiteDelete = "sites/delete"
 
 // SiteAddResponse contains the relevant site information when adding an Incapsula managed site
 type SiteAddResponse struct {
+	SiteID int `json:"site_id"`
+	Res    int `json:"res"`
+}
+
+// SiteUpdateResponse contains the relevant site information when updating an Incapsula managed site
+type SiteUpdateResponse struct {
 	SiteID int `json:"site_id"`
 	Res    int `json:"res"`
 }
@@ -46,6 +31,7 @@ type SiteStatusResponse struct {
 	SiteID            int      `json:"site_id"`
 	Status            string   `json:"status"`
 	Domain            string   `json:"domain"`
+	RefID             string   `json:"ref_id,omitempty"`
 	AccountID         int      `json:"account_id"`
 	AccelerationLevel string   `json:"acceleration_level"`
 	SiteCreationDate  int64    `json:"site_creation_date"`
@@ -79,6 +65,26 @@ type SiteStatusResponse struct {
 				ActivationMode         string `json:"activation_mode,omitempty"`
 				ActivationModeText     string `json:"activation_mode_text,omitempty"`
 				DdosTrafficThreshold   int    `json:"ddos_traffic_threshold,omitempty"`
+				Exceptions             []struct {
+					Values []struct {
+						ID   string   `json:"id,omitempty"`
+						Name string   `json:"name,omitempty"`
+						Ips  []string `json:"ips,omitempty"`
+						Urls []struct {
+							Value   string `json:"value,omitempty"`
+							Pattern string `json:"pattern,omitempty"`
+						} `json:"urls,omitempty"`
+						Geo struct {
+							Countries  []string `json:"countries,omitempty"`
+							Continents []string `json:"continents,omitempty"`
+						} `json:"geo,omitempty"`
+						ClientApps     []string `json:"client_apps,omitempty"`
+						ClientAppTypes []string `json:"client_app_types,omitempty"`
+						Parameters     []string `json:"parameters,omitempty"`
+						UserAgents     []string `json:"user_agents,omitempty"`
+					} `json:"values,omitempty"`
+					ID int `json:"id,omitempty"`
+				} `json:"exceptions,omitempty"`
 			} `json:"rules"`
 		} `json:"waf"`
 		Acls struct {
@@ -87,12 +93,33 @@ type SiteStatusResponse struct {
 				ID   string   `json:"id"`
 				Name string   `json:"name"`
 				Geo  struct {
-					Countries []string `json:"countries"`
+					Countries  []string `json:"countries"`
+					Continents []string `json:"continents"`
 				} `json:"geo,omitempty"`
 				Urls []struct {
 					Value   string `json:"value"`
 					Pattern string `json:"pattern"`
 				} `json:"urls,omitempty"`
+				Exceptions []struct {
+					Values []struct {
+						ID   string   `json:"id"`
+						Name string   `json:"name"`
+						Ips  []string `json:"ips,omitempty"`
+						Urls []struct {
+							Value   string `json:"value"`
+							Pattern string `json:"pattern"`
+						} `json:"urls,omitempty"`
+						Geo struct {
+							Countries  []string `json:"countries"`
+							Continents []string `json:"continents"`
+						} `json:"geo,omitempty"`
+						ClientApps     []string `json:"client_apps,omitempty"`
+						ClientAppTypes []string `json:"client_app_types,omitempty"`
+						Parameters     []string `json:"parameters,omitempty"`
+						UserAgents     []string `json:"user_agents,omitempty"`
+					} `json:"values"`
+					ID int `json:"id"`
+				} `json:"exceptions"`
 			} `json:"rules"`
 		} `json:"acls"`
 	} `json:"security"`
@@ -156,6 +183,7 @@ type SiteStatusResponse struct {
 		CacheHeaders              []interface{} `json:"cache_headers"`
 	} `json:"performance_configuration"`
 	ExtendedDdos int    `json:"extended_ddos"`
+	ExceptionID  string `json:"exception_id,omitempty"`
 	Res          int    `json:"res"`
 	ResMessage   string `json:"res_message"`
 	DebugInfo    struct {
@@ -163,53 +191,10 @@ type SiteStatusResponse struct {
 	} `json:"debug_info"`
 }
 
-// Verify checks the API credentials
-func (c *Client) Verify() error {
-	// Specifically shaded this struct, no need to share across funcs or export
-	// We only care about the response code and possibly the message
-	type AccountResponse struct {
-		Res        int    `json:"res"`
-		ResMessage string `json:"res_message"`
-	}
-
-	log.Println("[INFO] Checking API credentials against Incapsula API")
-
-	// Post form to Incapsula
-	resp, err := c.httpClient.PostForm(fmt.Sprintf("%s/%s", c.config.BaseURL, endpointAccount), url.Values{
-		"api_id":  {c.config.APIID},
-		"api_key": {c.config.APIKey},
-	})
-	if err != nil {
-		return fmt.Errorf("Error checking account: %s", err)
-	}
-
-	// Read the body
-	defer resp.Body.Close()
-	responseBody, err := ioutil.ReadAll(resp.Body)
-
-	// Dump JSON
-	log.Printf("[DEBUG] Incapsula acount JSON response: %s\n", string(responseBody))
-
-	// Parse the JSON
-	var accountResponse AccountResponse
-	err = json.Unmarshal([]byte(responseBody), &accountResponse)
-	if err != nil {
-		return fmt.Errorf("Error parsing account JSON response: %s", err)
-	}
-
-	// Look at the response status code from Incapsula
-	if accountResponse.Res != 0 {
-		return fmt.Errorf("Error from Incapsula service when checking account: %s", string(responseBody))
-	}
-
-	return nil
-}
-
 // AddSite adds a site to be managed by Incapsula
-func (c *Client) AddSite(domain, accountID, refID, sendSiteSetupEmails, siteIP, forceSSL, logLevel, logsAccountID string) (*SiteAddResponse, error) {
+func (c *Client) AddSite(domain, accountID, refID, sendSiteSetupEmails, siteIP, forceSSL string) (*SiteAddResponse, error) {
 	log.Printf("[INFO] Adding Incapsula site for domain: %s\n", domain)
 
-	// Post form to Incapsula
 	resp, err := c.httpClient.PostForm(fmt.Sprintf("%s/%s", c.config.BaseURL, endpointSiteAdd), url.Values{
 		"api_id":                 {c.config.APIID},
 		"api_key":                {c.config.APIKey},
@@ -219,8 +204,6 @@ func (c *Client) AddSite(domain, accountID, refID, sendSiteSetupEmails, siteIP, 
 		"send_site_setup_emails": {sendSiteSetupEmails},
 		"site_ip":                {siteIP},
 		"force_ssl":              {forceSSL},
-		"log_level":              {logLevel},
-		"logs_account_id":        {logsAccountID},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("Error adding site for domain %s: %s", domain, err)
@@ -284,6 +267,44 @@ func (c *Client) SiteStatus(domain string, siteID int) (*SiteStatusResponse, err
 	return &siteStatusResponse, nil
 }
 
+// UpdateSite will update the specific param/value on the site resource
+func (c *Client) UpdateSite(siteID, param, value string) (*SiteUpdateResponse, error) {
+	log.Printf("[INFO] Updating Incapsula site for siteID: %s\n", siteID)
+
+	// Post form to Incapsula
+	resp, err := c.httpClient.PostForm(fmt.Sprintf("%s/%s", c.config.BaseURL, endpointSiteUpdate), url.Values{
+		"api_id":  {c.config.APIID},
+		"api_key": {c.config.APIKey},
+		"site_id": {siteID},
+		"param":   {param},
+		"value":   {value},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Error updating param (%s) with value (%s) on site_id: %s: %s", param, value, siteID, err)
+	}
+
+	// Read the body
+	defer resp.Body.Close()
+	responseBody, err := ioutil.ReadAll(resp.Body)
+
+	// Dump JSON
+	log.Printf("[DEBUG] Incapsula update site JSON response: %s\n", string(responseBody))
+
+	// Parse the JSON
+	var siteUpdateResponse SiteUpdateResponse
+	err = json.Unmarshal([]byte(responseBody), &siteUpdateResponse)
+	if err != nil {
+		return nil, fmt.Errorf("Error parsing update site JSON response for siteID %s: %s", siteID, err)
+	}
+
+	// Look at the response status code from Incapsula
+	if siteUpdateResponse.Res != 0 {
+		return nil, fmt.Errorf("Error from Incapsula service when updating site for siteID %s: %s", siteID, string(responseBody))
+	}
+
+	return &siteUpdateResponse, nil
+}
+
 // DeleteSite deletes a site currently managed by Incapsula
 func (c *Client) DeleteSite(domain string, siteID int) error {
 	// Specifically shaded this struct, no need to share across funcs or export
@@ -325,54 +346,4 @@ func (c *Client) DeleteSite(domain string, siteID int) error {
 	}
 
 	return nil
-}
-
-// ConfigureACLSecurityRule adds an ACL rule
-func (c *Client) ConfigureACLSecurityRule(siteID int, ruleID, countries, ips, urls, urlPatterns string) (*SiteStatusResponse, error) {
-	log.Printf("[INFO] Configuring Incapsula ACL rule id: %s for site id: %d\n", ruleID, siteID)
-
-	// Base URL values
-	values := url.Values{
-		"api_id":  {c.config.APIID},
-		"api_key": {c.config.APIKey},
-		"site_id": {strconv.Itoa(siteID)},
-		"rule_id": {ruleID},
-	}
-
-	// Additional URL values for specific rule ids
-	if ruleID == blacklistedCountries {
-		values.Add("countries", countries)
-	} else if ruleID == blacklistedURLs {
-		values.Add("urls", urls)
-		values.Add("url_patterns", urlPatterns)
-	} else if ruleID == blacklistedIPs || ruleID == whitelistedIPs {
-		values.Add("ips", ips)
-	}
-
-	// Post form to Incapsula
-	resp, err := c.httpClient.PostForm(fmt.Sprintf("%s/%s", c.config.BaseURL, endpointACLRuleConfigure), values)
-	if err != nil {
-		return nil, fmt.Errorf("Error adding ACL for rule id %s and site id %d", ruleID, siteID)
-	}
-
-	// Read the body
-	defer resp.Body.Close()
-	responseBody, err := ioutil.ReadAll(resp.Body)
-
-	// Dump JSON
-	log.Printf("[DEBUG] Incapsula add ACL rule JSON response: %s\n", string(responseBody))
-
-	// Parse the JSON
-	var siteStatusResponse SiteStatusResponse
-	err = json.Unmarshal([]byte(responseBody), &siteStatusResponse)
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing add ACL rule JSON response for rule id %s and site id %d", ruleID, siteID)
-	}
-
-	// Look at the response status code from Incapsula
-	if siteStatusResponse.Res != 0 {
-		return nil, fmt.Errorf("Error from Incapsula service when adding ACL rule for rule id %s and site id %d: %s", ruleID, siteID, string(responseBody))
-	}
-
-	return &siteStatusResponse, nil
 }

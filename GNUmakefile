@@ -41,6 +41,8 @@ fmtcheck:
 errcheck:
 	@sh -c "'$(CURDIR)/scripts/errcheck.sh'"
 
+clean:
+	go clean -cache -modcache -i -r
 
 test-compile:
 	@if [ "$(TEST)" = "./..." ]; then \

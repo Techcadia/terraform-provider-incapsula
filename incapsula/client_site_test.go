@@ -10,78 +10,6 @@ import (
 )
 
 ////////////////////////////////////////////////////////////////
-// Verify Tests
-////////////////////////////////////////////////////////////////
-func TestClientVerifyBadConnection(t *testing.T) {
-	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: "badness.incapsula.com"}
-	client := &Client{config: config, httpClient: &http.Client{Timeout: time.Millisecond * 1}}
-	err := client.Verify()
-	if err == nil {
-		t.Errorf("Should have received an error")
-	}
-	if !strings.HasPrefix(err.Error(), "Error checking account") {
-		t.Errorf("Should have received an client error, got: %s", err)
-	}
-}
-
-func TestClientVerifyBadJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		if req.URL.String() != fmt.Sprintf("/%s", endpointAccount) {
-			t.Errorf("Should have have hit /%s endpoint. Got: %s", endpointAccount, req.URL.String())
-		}
-		rw.Write([]byte(`{`))
-	}))
-	defer server.Close()
-
-	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
-	client := &Client{config: config, httpClient: &http.Client{}}
-	err := client.Verify()
-	if err == nil {
-		t.Errorf("Should have received an error")
-	}
-	if !strings.HasPrefix(err.Error(), "Error parsing account JSON response") {
-		t.Errorf("Should have received a JSON parse error, got: %s", err)
-	}
-}
-
-func TestClientVerifyInvalidAccount(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		if req.URL.String() != fmt.Sprintf("/%s", endpointAccount) {
-			t.Errorf("Should have have hit /%s endpoint. Got: %s", endpointAccount, req.URL.String())
-		}
-		rw.Write([]byte(`{"res":1,"res_message":"fail"}`))
-	}))
-	defer server.Close()
-
-	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
-	client := &Client{config: config, httpClient: &http.Client{}}
-	err := client.Verify()
-	if err == nil {
-		t.Errorf("Should have received an error")
-	}
-	if !strings.HasPrefix(err.Error(), "Error from Incapsula service when checking account") {
-		t.Errorf("Should have received a bad account error, got: %s", err)
-	}
-}
-
-func TestClientVerifyValidAccount(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		if req.URL.String() != fmt.Sprintf("/%s", endpointAccount) {
-			t.Errorf("Should have have hit /%s endpoint. Got: %s", endpointAccount, req.URL.String())
-		}
-		rw.Write([]byte(`{"res":0,"res_message":"OK"}`))
-	}))
-	defer server.Close()
-
-	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
-	client := &Client{config: config, httpClient: &http.Client{}}
-	err := client.Verify()
-	if err != nil {
-		t.Errorf("Should not have received an error, got: %s", err)
-	}
-}
-
-////////////////////////////////////////////////////////////////
 // AddSite Tests
 ////////////////////////////////////////////////////////////////
 
@@ -89,7 +17,7 @@ func TestClientAddSiteBadConnection(t *testing.T) {
 	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: "badness.incapsula.com"}
 	client := &Client{config: config, httpClient: &http.Client{Timeout: time.Millisecond * 1}}
 	domain := "foo.com"
-	addSiteResponse, err := client.AddSite(domain, "", "", "", "", "", "", "")
+	addSiteResponse, err := client.AddSite(domain, "", "", "", "", "")
 	if err == nil {
 		t.Errorf("Should have received an error")
 	}
@@ -113,7 +41,7 @@ func TestClientAddSiteBadJSON(t *testing.T) {
 	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
 	client := &Client{config: config, httpClient: &http.Client{}}
 	domain := "foo.com"
-	addSiteResponse, err := client.AddSite(domain, "", "", "", "", "", "", "")
+	addSiteResponse, err := client.AddSite(domain, "", "", "", "", "")
 	if err == nil {
 		t.Errorf("Should have received an error")
 	}
@@ -137,7 +65,7 @@ func TestClientAddSiteInvalidSite(t *testing.T) {
 	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
 	client := &Client{config: config, httpClient: &http.Client{}}
 	domain := "foo.com"
-	addSiteResponse, err := client.AddSite(domain, "", "", "", "", "", "", "")
+	addSiteResponse, err := client.AddSite(domain, "", "", "", "", "")
 	if err == nil {
 		t.Errorf("Should have received an error")
 	}
@@ -161,7 +89,7 @@ func TestClientAddSiteValidSite(t *testing.T) {
 	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
 	client := &Client{config: config, httpClient: &http.Client{}}
 	domain := "foo.com"
-	addSiteResponse, err := client.AddSite(domain, "", "", "", "", "", "", "")
+	addSiteResponse, err := client.AddSite(domain, "", "", "", "", "")
 	if err != nil {
 		t.Errorf("Should not have received an error")
 	}
@@ -274,6 +202,103 @@ func TestClientSiteStatusValidSite(t *testing.T) {
 		t.Errorf("DNS records are not empty")
 	}
 	if siteStatusResponse.Res != 0 {
+		t.Errorf("Response code doesn't match")
+	}
+}
+
+////////////////////////////////////////////////////////////////
+// UpdateSite Tests
+////////////////////////////////////////////////////////////////
+
+func TestClientUpdateSiteBadConnection(t *testing.T) {
+	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: "badness.incapsula.com"}
+	client := &Client{config: config, httpClient: &http.Client{Timeout: time.Millisecond * 1}}
+	siteID := "42"
+	param := "active"
+	value := "bypass"
+	updateSiteResponse, err := client.UpdateSite(siteID, param, value)
+	if err == nil {
+		t.Errorf("Should have received an error")
+	}
+	if !strings.HasPrefix(err.Error(), fmt.Sprintf("Error updating param (%s) with value (%s) on site_id: %s", param, value, siteID)) {
+		t.Errorf("Should have received an client error, got: %s", err)
+	}
+	if updateSiteResponse != nil {
+		t.Errorf("Should have received a nil updateSiteResponse instance")
+	}
+}
+
+func TestClientUpdateSiteBadJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if req.URL.String() != fmt.Sprintf("/%s", endpointSiteUpdate) {
+			t.Errorf("Should have have hit /%s endpoint. Got: %s", endpointSiteUpdate, req.URL.String())
+		}
+		rw.Write([]byte(`{`))
+	}))
+	defer server.Close()
+
+	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
+	client := &Client{config: config, httpClient: &http.Client{}}
+	siteID := "42"
+	updateSiteResponse, err := client.UpdateSite(siteID, "", "")
+	if err == nil {
+		t.Errorf("Should have received an error")
+	}
+	if !strings.HasPrefix(err.Error(), fmt.Sprintf("Error parsing update site JSON response for siteID %s", siteID)) {
+		t.Errorf("Should have received a JSON parse error, got: %s", err)
+	}
+	if updateSiteResponse != nil {
+		t.Errorf("Should have received a nil updateSiteResponse instance")
+	}
+}
+
+func TestClientUpdateSiteInvalidSite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if req.URL.String() != fmt.Sprintf("/%s", endpointSiteUpdate) {
+			t.Errorf("Should have have hit /%s endpoint. Got: %s", endpointSiteUpdate, req.URL.String())
+		}
+		rw.Write([]byte(`{"site_id":0,"res":1}`))
+	}))
+	defer server.Close()
+
+	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
+	client := &Client{config: config, httpClient: &http.Client{}}
+	siteID := "42"
+	updateSiteResponse, err := client.UpdateSite(siteID, "", "")
+	if err == nil {
+		t.Errorf("Should have received an error")
+	}
+	if !strings.HasPrefix(err.Error(), fmt.Sprintf("Error from Incapsula service when updating site for siteID %s", siteID)) {
+		t.Errorf("Should have received a bad site error, got: %s", err)
+	}
+	if updateSiteResponse != nil {
+		t.Errorf("Should have received a nil updateSiteResponse instance")
+	}
+}
+
+func TestClientUpdateSiteValidSite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if req.URL.String() != fmt.Sprintf("/%s", endpointSiteUpdate) {
+			t.Errorf("Should have have hit /%s endpoint. Got: %s", endpointSiteUpdate, req.URL.String())
+		}
+		rw.Write([]byte(`{"site_id":123,"res":0}`))
+	}))
+	defer server.Close()
+
+	config := &Config{APIID: "foo", APIKey: "bar", BaseURL: server.URL}
+	client := &Client{config: config, httpClient: &http.Client{}}
+	siteID := "42"
+	addSiteResponse, err := client.UpdateSite(siteID, "", "")
+	if err != nil {
+		t.Errorf("Should not have received an error")
+	}
+	if addSiteResponse == nil {
+		t.Errorf("Should not have received a nil addSiteResponse instance")
+	}
+	if addSiteResponse.SiteID != 123 {
+		t.Errorf("Site ID doesn't match")
+	}
+	if addSiteResponse.Res != 0 {
 		t.Errorf("Response code doesn't match")
 	}
 }
